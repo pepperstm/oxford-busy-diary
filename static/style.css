@@ -157,6 +157,17 @@ footer { padding: 20px 36px; color: #94a1a5; font-size: 11px; border-top: 1px so
 .calendar-links small { color: #809198; }
 .calendar-links button { min-height: 29px; padding: 5px 8px; }
 .search-empty { text-align: center; color: #87969a; padding: 25px; }
+.bulk-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid #e7eded; background: #fafdfc; font-size: 12px; color: #59716f; font-weight: 700; }
+.bulk-controls { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.bulk-controls select { min-width: 125px; }
+.bulk-controls .button { min-height: 35px; }
+.bulk-controls .button:disabled { opacity: .45; cursor: not-allowed; }
+.select-cell { width: 44px; min-width: 44px; text-align: center; }
+.select-cell input { width: 16px; height: 16px; accent-color: #14796a; cursor: pointer; }
+.review-message { margin: 0; padding: 10px 20px; color: #236b56; background: #e7f5ed; font-size: 12px; font-weight: 700; }
+.review-message.error { color: #a5533d; background: #fff1e5; }
+.review-empty { padding: 20px; text-align: center; color: #6b8080; font-size: 12px; }
+[hidden] { display: none !important; }
 @media (max-width: 1150px) {
   .sidebar { width: 205px; flex-basis: 205px; }
   main { padding: 26px 25px 40px; }
@@ -197,6 +208,10 @@ footer { padding: 20px 36px; color: #94a1a5; font-size: 11px; border-top: 1px so
   .filters { padding: 15px 16px; }
   .filters label { flex: 1 1 120px; }
   .filters .button { flex: 1 1 100%; }
+  .bulk-bar { display: block; padding: 13px 16px; }
+  .bulk-controls { margin-top: 9px; }
+  .select-cell { min-width: 0; width: auto; }
+  td.select-cell::before { content: none; }
   table { min-width: 0; }
   thead { display: none; }
   tbody tr { display: block; padding: 14px 16px; border-bottom: 1px solid #e7eded; }

@@ -40,7 +40,7 @@
           <a class="button button-soft" href="/sources">Manage sources <span aria-hidden="true">↗</span></a>
         </section>
 
-        <section class="stats" aria-label="Diary overview">
+        <section class="stats" id="stats-section" aria-label="Diary overview">
           <div class="stat-card"><span>Upcoming events</span><strong>{{stats.upcoming}}</strong><small>Across your public sources</small></div>
           <div class="stat-card"><span>To review</span><strong>{{stats.review}}</strong><small>New dates to check</small></div>
           <div class="stat-card"><span>Sources</span><strong>{{stats.sources}}</strong><small>Pages and calendar feeds</small></div>
@@ -48,7 +48,7 @@
         </section>
 
         {% if busy %}
-        <section class="section-block" aria-labelledby="watch-title">
+        <section class="section-block" id="watch-section" aria-labelledby="watch-title">
           <div class="section-heading">
             <div><p class="eyebrow">LOCAL SIGNALS</p><h2 id="watch-title">Dates to watch</h2><p>Indicative demand near Cornmarket Street, based on the events below.</p></div>
           </div>
@@ -98,18 +98,28 @@
           </form>
 
           {% if events %}
-          <div class="table-wrap">
+          <div class="bulk-bar" id="bulk-bar" aria-live="polite">
+            <span id="selected-count">0 selected</span>
+            <div class="bulk-controls">
+              <label for="bulk-status">Set selected to</label>
+              <select id="bulk-status" aria-label="Bulk review status"><option value="approved">Approved</option><option value="ignored">Ignored</option><option value="new">New</option></select>
+              <button class="button button-primary" id="bulk-apply" type="button" disabled>Apply to selected</button>
+            </div>
+          </div>
+          <p class="review-message" id="review-message" role="status" hidden></p>
+          <div class="table-wrap" id="event-results" data-status-filter="{{filters.get('status','')}}">
             <table>
-              <thead><tr><th>Date</th><th>Event</th><th>Venue</th><th>Type</th><th>Signal</th><th>Review</th></tr></thead>
+              <thead><tr><th class="select-cell"><input type="checkbox" id="select-all" aria-label="Select all shown events"></th><th>Date</th><th>Event</th><th>Venue</th><th>Type</th><th>Signal</th><th>Review</th></tr></thead>
               <tbody>
                 {% for e in events %}
-                <tr>
+                <tr data-event-id="{{e.id}}">
+                  <td class="select-cell" data-label="Select"><input class="event-check" type="checkbox" value="{{e.id}}" aria-label="Select {{e.title}}"></td>
                   <td class="date-cell" data-label="Date"><strong>{{e.start[:10]}}</strong>{% if e.end and e.end[:10] != e.start[:10] %}<small>to {{e.end[:10]}}</small>{% elif 'T' in e.start %}<small>{{e.start[11:16]}}</small>{% endif %}</td>
                   <td class="event-cell" data-label="Event"><a href="{{e.source_url}}" target="_blank" rel="noopener">{{e.title}} <span aria-hidden="true">↗</span></a><small>{{e.organiser or ''}}{% if e.attendance %} · Published capacity {{e.attendance}}{% endif %}</small>{% if e.change_note %}<span class="change">{{e.change_note}}</span>{% endif %}</td>
                   <td data-label="Venue">{{e.venue or 'Unknown'}}</td>
                   <td data-label="Type"><span class="type-pill">{{e.event_type}}</span></td>
                   <td data-label="Signal"><strong class="signal">{{(e.relevance*100)|round|int}}%</strong><small>{{(e.confidence*100)|round|int}}% confidence</small></td>
-                  <td data-label="Review"><form method="post" action="/events/{{e.id}}/status"><select name="status" aria-label="Review status for {{e.title}}" onchange="this.form.submit()">{% for s in ['new','approved','ignored'] %}<option value="{{s}}" {% if e.status==s %}selected{% endif %}>{{s|title}}</option>{% endfor %}</select></form><small>Checked {{e.last_checked[:10]}}</small></td>
+                  <td data-label="Review"><form class="review-form" method="post" action="/events/{{e.id}}/status"><select name="status" aria-label="Review status for {{e.title}}" data-original="{{e.status}}" onchange="this.form.requestSubmit()">{% for s in ['new','approved','ignored'] %}<option value="{{s}}" {% if e.status==s %}selected{% endif %}>{{s|title}}</option>{% endfor %}</select></form><small>Checked {{e.last_checked[:10]}}</small></td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -133,5 +143,6 @@
       <footer>Public event signals · Verify dates and venues with organisers</footer>
     </div>
   </div>
+  <script src="/static/events.js" defer></script>
 </body>
 </html>

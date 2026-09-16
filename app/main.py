@@ -531,7 +531,25 @@ def event_status(event_id):
     if status not in ('new','approved','ignored'):
         abort(400)
     with conn() as db:
-        db.execute('UPDATE events SET status=? WHERE id=?', (status,event_id))
+        result = db.execute('UPDATE events SET status=? WHERE id=?', (status,event_id))
+    if result.rowcount == 0:
+        abort(404)
+    if request.headers.get('Accept') == 'application/json':
+        return {'updated': 1, 'status': status}
+    return redirect(request.referrer or url_for('index'))
+
+
+@app.post('/events/bulk-status')
+def bulk_event_status():
+    status = request.form.get('status')
+    raw_ids = request.form.getlist('event_ids')
+    if status not in ('new', 'approved', 'ignored') or not raw_ids or len(raw_ids) > 2000 or any(not value.isdecimal() for value in raw_ids):
+        abort(400)
+    ids = list(dict.fromkeys(int(value) for value in raw_ids))
+    with conn() as db:
+        result = db.execute('UPDATE events SET status=? WHERE id IN (' + ','.join('?' for _ in ids) + ')', [status, *ids])
+    if request.headers.get('Accept') == 'application/json':
+        return {'updated': result.rowcount, 'status': status}
     return redirect(request.referrer or url_for('index'))
 
 
