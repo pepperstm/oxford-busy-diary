@@ -1,4 +1,5 @@
 import csv
+import html as html_lib
 import io
 import json
 import os
@@ -6,11 +7,13 @@ import re
 import sqlite3
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
+from zoneinfo import ZoneInfo
 
 import requests
+from icalendar import Calendar
 from apscheduler.schedulers.background import BackgroundScheduler
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
@@ -50,6 +53,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS sources (id INTEGER PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL UNIQUE, kind TEXT NOT NULL DEFAULT 'listing', enabled INTEGER NOT NULL DEFAULT 1, last_checked TEXT, last_success TEXT, health TEXT DEFAULT 'new', error TEXT, pages_checked INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, dedupe_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, start TEXT NOT NULL, end TEXT, venue TEXT, organiser TEXT, event_type TEXT, attendance INTEGER, public_clue TEXT, source_url TEXT NOT NULL, source_id INTEGER, last_checked TEXT, first_seen TEXT, updated_at TEXT, status TEXT NOT NULL DEFAULT 'new', confidence REAL, relevance REAL, change_note TEXT);
         CREATE TABLE IF NOT EXISTS sightings (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, source_id INTEGER NOT NULL, url TEXT NOT NULL, seen_at TEXT NOT NULL, UNIQUE(event_id,url));
+        CREATE TABLE IF NOT EXISTS calendar_links (id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL, url TEXT NOT NULL, label TEXT, kind TEXT NOT NULL, last_seen TEXT NOT NULL, UNIQUE(source_id,url));
         CREATE INDEX IF NOT EXISTS idx_events_start ON events(start);
         ''')
         # An earlier release seeded both spellings of the All Souls URL.
@@ -100,24 +104,102 @@ def allowed(url):
     return robots_cache[root].can_fetch(AGENT, url), 'Disallowed by robots.txt'
 
 
-def fetch(url):
-    ok, reason = allowed(url)
-    if not ok:
-        raise RuntimeError(reason)
-    host = urlparse(url).netloc
-    pause = DELAY - (time.monotonic() - last_request.get(host, -DELAY))
-    if pause > 0:
-        time.sleep(pause)
-    last_request[host] = time.monotonic()
-    response = SESSION.get(url, timeout=20, allow_redirects=True)
-    response.raise_for_status()
-    if urlparse(response.url).netloc != host:
-        ok, reason = allowed(response.url)
+def request_public(url, accept=None):
+    """Check robots before each request, including a redirected destination."""
+    for _ in range(6):
+        ok, reason = allowed(url)
         if not ok:
-            raise RuntimeError('Redirect target: ' + reason)
+            raise RuntimeError(reason)
+        host = urlparse(url).netloc
+        pause = DELAY - (time.monotonic() - last_request.get(host, -DELAY))
+        if pause > 0:
+            time.sleep(pause)
+        last_request[host] = time.monotonic()
+        headers = {'Accept': accept} if accept else None
+        response = SESSION.get(url, timeout=20, allow_redirects=False, headers=headers)
+        if 300 <= response.status_code < 400 and response.headers.get('Location'):
+            url = urljoin(url, response.headers['Location'])
+            continue
+        response.raise_for_status()
+        return response
+    raise RuntimeError('Too many redirects')
+
+
+def fetch(url):
+    response = request_public(url)
     if 'html' not in response.headers.get('Content-Type', ''):
         raise RuntimeError('Non-HTML response')
     return response.text, response.url
+
+
+def fetch_calendar(url):
+    response = request_public(url, 'text/calendar,text/plain,*/*;q=0.2')
+    if len(response.content) > 5_000_000 or not response.content.lstrip().startswith(b'BEGIN:VCALENDAR'):
+        raise RuntimeError('Not a supported public iCal calendar')
+    return response.content, response.url
+
+
+def discover_calendar_links(soup, page_url):
+    """Expose stable feed links and event downloads found on public HTML pages."""
+    found = {}
+    for tag in soup.select('a[href], link[href]'):
+        href = tag.get('href', '').strip()
+        if href.startswith('webcal://'):
+            target = 'https://' + href[len('webcal://'):]
+        else:
+            target = urljoin(page_url, href)
+        if urlparse(target).scheme not in ('http', 'https'):
+            continue
+        label = tag.get_text(' ', strip=True) if tag.name == 'a' else tag.get('title', '')
+        path = urlparse(target).path.lower()
+        is_ics = path.endswith(('.ics', '.ical')) or 'oxford_event_ical' in path
+        is_calendar_type = tag.get('type', '').lower() == 'text/calendar'
+        if not is_ics and not is_calendar_type:
+            continue
+        feed = bool(re.search(r'\b(?:feed|subscribe|all events|entire calendar)\b', label, re.I) or
+                    path.endswith(('/ical.ics', '/events.ics', '/events.ical', '/feed.ics')) or
+                    tag.name == 'link' and is_calendar_type)
+        found[target] = (label[:100] or ('Calendar feed' if feed else 'Add to calendar'), 'feed' if feed else 'event')
+    return found
+
+
+def calendar_events(data, url, source):
+    # One Drupal feed escapes the line break before DTSTART as literal "\\n".
+    data = re.sub(rb'\\n(?=DTSTART(?:;[^:]*)?:)', b'\r\n', data)
+    cal = Calendar.from_ical(data)
+    results = []
+    local_zone = ZoneInfo('Europe/London')
+    for item in cal.walk('VEVENT'):
+        if len(results) >= 500 or not item.get('DTSTART') or not item.get('SUMMARY'):
+            continue
+        if str(item.get('STATUS', '')).upper() == 'CANCELLED':
+            continue
+        raw_start = item.decoded('DTSTART')
+        if isinstance(raw_start, datetime):
+            start = raw_start.astimezone(local_zone).strftime('%Y-%m-%dT%H:%M') if raw_start.tzinfo else raw_start.strftime('%Y-%m-%dT%H:%M')
+        elif isinstance(raw_start, date):
+            start = raw_start.isoformat()
+        else:
+            continue
+        if start[:10] < datetime.now().date().isoformat():
+            continue
+        raw_end = item.decoded('DTEND') if item.get('DTEND') else None
+        end = None
+        if isinstance(raw_end, datetime):
+            end = raw_end.astimezone(local_zone).strftime('%Y-%m-%dT%H:%M') if raw_end.tzinfo else raw_end.strftime('%Y-%m-%dT%H:%M')
+        elif isinstance(raw_end, date):
+            end = (raw_end - timedelta(days=1)).isoformat() if not isinstance(raw_start, datetime) else raw_end.isoformat()
+        title = html_lib.unescape(html_lib.unescape(str(item.get('SUMMARY')).strip()))
+        venue = html_lib.unescape(html_lib.unescape(str(item.get('LOCATION', '')).strip())) or source['name']
+        if not title or (end and end[:10] < start[:10]) or re.search(r'\b(?:online only|virtual only)\b', venue, re.I):
+            continue
+        event_url = str(item.get('URL', '')).strip()
+        if urlparse(event_url).scheme not in ('http', 'https'):
+            event_url = url
+        results.append(dict(title=title, start=start, end=end, venue=venue, organiser=source['name'],
+                            event_type=classify(title, str(item.get('DESCRIPTION', ''))[:250]), attendance=None,
+                            public_clue='Public calendar feed; verify with organiser', source_url=event_url, evidence='calendar'))
+    return results
 
 
 def date_value(value):
@@ -223,7 +305,7 @@ def key_for(event):
 def save_event(db, event, source_id):
     key = key_for(event)
     old = db.execute('SELECT * FROM events WHERE dedupe_key=?', (key,)).fetchone()
-    event['confidence'] = {'structured': .9, 'adapter': .8, 'html': .65, 'directory': .45}[event['evidence']]
+    event['confidence'] = {'structured': .9, 'calendar': .85, 'adapter': .8, 'html': .65, 'directory': .45}[event['evidence']]
     event['relevance'] = {'conference': 1, 'symposium': .9, 'graduation': .95, 'open doors': .9, 'open day': .85, 'home match': .9, 'term date': .5, 'festival': .85, 'formal': .75, 'performance': .7, 'public event': .6, 'access alert': 0, 'workshop': .7, 'other academic': .35}[event['event_type']]
     if event['attendance']:
         event['relevance'] = min(1, event['relevance'] + .1)
@@ -261,18 +343,30 @@ def scan_source(source_id):
                     continue
                 seen.add(url)
                 try:
-                    html, final_url = fetch(url)
+                    if source['kind'] == 'ical':
+                        data, final_url = fetch_calendar(url)
+                    else:
+                        html, final_url = fetch(url)
                 except Exception as e:
                     if count == 0:
                         raise
                     skipped.append(f'{url}: {str(e)[:120]}')
                     continue
                 count += 1
-                if source['kind'] in ADAPTERS:
+                if count == 1:
+                    db.execute('DELETE FROM calendar_links WHERE source_id=?', (source_id,))
+                if source['kind'] == 'ical':
+                    events = calendar_events(data, final_url, source)
+                    soup = None
+                elif source['kind'] in ADAPTERS:
                     events = ADAPTERS[source['kind']](html, final_url)
                     soup = BeautifulSoup(html, 'html.parser')
                 else:
                     events, soup = extract(html, final_url, source)
+                if soup is not None:
+                    for target, (label, kind) in discover_calendar_links(soup, final_url).items():
+                        db.execute('INSERT INTO calendar_links(source_id,url,label,kind,last_seen) VALUES(?,?,?,?,?) ON CONFLICT(source_id,url) DO UPDATE SET label=excluded.label,kind=excluded.kind,last_seen=excluded.last_seen',
+                                   (source_id,target,label,kind,now()))
                 for event in events:
                     if (event['end'] or event['start'])[:10] >= datetime.now().date().isoformat():
                         save_event(db, event, source_id)
@@ -285,7 +379,8 @@ def scan_source(source_id):
                         if urlparse(href).netloc == urlparse(source['url']).netloc and relevant and href not in seen and href not in pages:
                             pages.append(href)
                 db.commit()
-            health = f'ok · {found} events' if found else 'empty · no dated events'
+            feed_count = db.execute('SELECT COUNT(*) FROM calendar_links WHERE source_id=? AND kind="feed"', (source_id,)).fetchone()[0]
+            health = f'ok · {found} events' if found else 'calendar feed available' if feed_count else 'empty · no dated events'
             if skipped:
                 health += f' · {len(skipped)} page(s) skipped'
             root = f'{urlparse(source["url"]).scheme}://{urlparse(source["url"]).netloc}'
@@ -387,7 +482,10 @@ def index():
 def sources():
     with conn() as db:
         rows = db.execute('SELECT * FROM sources ORDER BY name').fetchall()
-    return render_template('sources.html', sources=rows, scan_running=scan_lock.locked())
+        links = {}
+        for link in db.execute('SELECT * FROM calendar_links ORDER BY kind DESC, label, url'):
+            links.setdefault(link['source_id'], []).append(link)
+    return render_template('sources.html', sources=rows, source_urls={row['url'] for row in rows}, calendar_links=links, scan_running=scan_lock.locked())
 
 
 @app.post('/sources')
@@ -398,7 +496,7 @@ def add_source():
         abort(400)
     with conn() as db:
         kind = request.form.get('kind','listing')
-        if kind not in ('listing', *ADAPTERS):
+        if kind not in ('listing', 'ical', *ADAPTERS):
             abort(400)
         db.execute('INSERT OR IGNORE INTO sources(name,url,kind) VALUES(?,?,?)', (name,url,kind))
     return redirect(url_for('sources'))
@@ -415,7 +513,7 @@ def edit_source(source_id):
             if not name or urlparse(url).scheme not in ('http','https'):
                 abort(400)
             kind = request.form.get('kind','listing')
-            if kind not in ('listing', *ADAPTERS):
+            if kind not in ('listing', 'ical', *ADAPTERS):
                 abort(400)
             db.execute('UPDATE sources SET name=?,url=?,kind=?,enabled=? WHERE id=?', (name,url,kind,1 if request.form.get('enabled') else 0,source_id))
     return redirect(url_for('sources'))
