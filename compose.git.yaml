@@ -1,0 +1,13 @@
+# Build the app from the current main branch on GitHub.
+# Keep this file, .env, and the data/ folder together on your laptop.
+services:
+  oxford-tracker:
+    build:
+      context: https://github.com/pepperstm/oxford-busy-diary.git#main
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+    env_file:
+      - .env
+    restart: "no"
