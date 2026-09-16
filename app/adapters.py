@@ -243,4 +243,25 @@ def song_festival(html, url):
     return [event]
 
 
-ADAPTERS = {'fixtures': fixtures, 'ceremonies': ceremonies, 'terms': terms, 'theatre': theatre, 'access': access, 'major': major, 'science_festival': science_festival, 'song_festival': song_festival}
+def symposia(html, url):
+    """The organiser's detail pages publish the full dates and physical venue."""
+    soup = BeautifulSoup(html, 'html.parser')
+    title = soup.select_one('[data-hook="event-title"]')
+    dates = soup.select_one('[data-hook="event-full-date"]')
+    venue = soup.select_one('[data-hook="event-full-location"]')
+    if not title or not dates or not venue:
+        return []
+    labels = re.findall(r'\b\d{1,2} [A-Za-z]{3} 20\d{2}\b', dates.get_text(' ', strip=True))
+    if not labels:
+        return []
+    start = _future_date(labels[0])
+    end = _future_date(labels[-1])
+    if not start or not end or (date.fromisoformat(end) - date.fromisoformat(start)).days > 21:
+        return []
+    event = _base(title.get_text(' ', strip=True), start, venue.get_text(' ', strip=True), url, 'symposium', 'Organiser event page; venue and dates published')
+    event['end'] = end
+    event['organiser'] = 'Oxford Symposia'
+    return [event]
+
+
+ADAPTERS = {'fixtures': fixtures, 'ceremonies': ceremonies, 'terms': terms, 'theatre': theatre, 'access': access, 'major': major, 'science_festival': science_festival, 'song_festival': song_festival, 'symposia': symposia}

@@ -268,10 +268,12 @@ def scan_source(source_id):
                     if (event['end'] or event['start'])[:10] >= datetime.now().date().isoformat():
                         save_event(db, event, source_id)
                         found += 1
-                if count == 1 and source['kind'] == 'listing':
-                    for a in soup.find_all('a', href=True):
+                if count == 1 and source['kind'] in ('listing', 'symposia'):
+                    links = soup.select('a[data-hook="title"][href]') if source['kind'] == 'symposia' else soup.find_all('a', href=True)
+                    for a in links:
                         href = urljoin(final_url, a['href']).split('#')[0]
-                        if urlparse(href).netloc == urlparse(source['url']).netloc and LINK_HINT.search(href + ' ' + a.get_text(' ', strip=True)) and href not in seen and href not in pages:
+                        relevant = source['kind'] == 'symposia' or LINK_HINT.search(href + ' ' + a.get_text(' ', strip=True))
+                        if urlparse(href).netloc == urlparse(source['url']).netloc and relevant and href not in seen and href not in pages:
                             pages.append(href)
                 db.commit()
             health = f'ok · {found} events' if found else 'empty · no dated events'
