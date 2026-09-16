@@ -1,1 +1,137 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Oxford Conference Tracker</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="desktop"><div class="window"><div class="titlebar"><div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div><span class="window-title">The Plough Inn — Busy Diary</span><span class="titlebar-spacer"></span></div><header><div><span class="eyebrow">THE PLOUGH INN · OXFORD</span><h1>Conference diary</h1><p>Publicly advertised events that may bring people into town. Review dates before adding them to the pub diary.</p></div><nav><a class="active" href="/">Events</a><a href="/sources">Sources</a></nav></header><main><section class="stats"><div><strong>{{stats.upcoming}}</strong><span>upcoming events</span></div><div><strong>{{stats.review}}</strong><span>to review</span></div><div><strong>{{stats.sources}}</strong><span>sources</span></div><div><strong>{{stats.errors}}</strong><span>source issues</span></div></section><section class="panel"><div class="section-head"><div><h2>Upcoming signals</h2><p>Higher relevance suggests a greater chance of local footfall; attendance is shown only when published.</p></div><div class="actions"><a class="button" href="/export.csv?{{request.query_string.decode()}}">Export CSV</a><a class="button" href="/export.ics?{{request.query_string.decode()}}">Export calendar</a></div></div><form class="filters" method="get"><label>From<input type="date" name="from" value="{{filters.get('from',today)}}"></label><label>To<input type="date" name="to" value="{{filters.get('to','')}}"></label><label>Venue<input name="venue" placeholder="Search venue" value="{{filters.get('venue','')}}"></label><label>Type<select name="type"><option value="">All types</option>{% for t in ['conference','symposium','workshop','graduation','open doors','open day','home match','term date','access alert','festival','formal','performance','public event','other academic'] %}<option value="{{t}}" {% if filters.get('type')==t %}selected{% endif %}>{{t|title}}</option>{% endfor %}</select></label><label>Confidence<select name="confidence"><option value="">Any</option><option value="0.8" {% if filters.get('confidence')=='0.8' %}selected{% endif %}>High</option><option value="0.6" {% if filters.get('confidence')=='0.6' %}selected{% endif %}>Medium+</option></select></label><label>Status<select name="status"><option value="">All</option>{% for s in ['new','approved','ignored'] %}<option value="{{s}}" {% if filters.get('status')==s %}selected{% endif %}>{{s|title}}</option>{% endfor %}</select></label><button>Apply filters</button></form>{% if busy %}<div class="busy-head"><h3>Dates to watch near 38 Cornmarket Street</h3><p>Indicative signal from public listings; check the linked events before changing staffing.</p></div><div class="busy-grid">{% for d in busy %}<div class="busy-card"><div><strong>{{d.date}}</strong><span class="busy-level">{{d.level}}</span></div><div class="busy-meter"><span style="width:{{d.score}}%"></span></div><b>{{d.score}} / 100</b><small>{{d.count}} event{{'s' if d.count != 1 else ''}} · {{d.areas}}</small><small>{{d.reasons|join(' · ')}}</small></div>{% endfor %}</div>{% endif %}<div class="calendar-strip" id="calendar"></div>{% if events %}<div class="table-wrap"><table><thead><tr><th>Date</th><th>Event</th><th>Venue</th><th>Type</th><th>Signal</th><th>Review</th></tr></thead><tbody>{% for e in events %}<tr data-date="{{e.start[:10]}}"><td class="date">{{e.start[:10]}}{% if e.end and e.end[:10] != e.start[:10] %}<small>to {{e.end[:10]}}</small>{% else %}<small>{{e.start[11:16] if 'T' in e.start else ''}}</small>{% endif %}</td><td><a class="title" href="{{e.source_url}}" target="_blank" rel="noopener">{{e.title}}</a><small>{{e.organiser or ''}}{% if e.attendance %} · Published capacity {{e.attendance}}{% endif %}</small>{% if e.change_note %}<span class="change">{{e.change_note}}</span>{% endif %}</td><td>{{e.venue or 'Unknown'}}</td><td><span class="pill">{{e.event_type}}</span></td><td><span class="score">{{(e.relevance*100)|round|int}}%</span><small>{{(e.confidence*100)|round|int}}% confidence</small></td><td><form method="post" action="/events/{{e.id}}/status"><select name="status" onchange="this.form.submit()">{% for s in ['new','approved','ignored'] %}<option value="{{s}}" {% if e.status==s %}selected{% endif %}>{{s|title}}</option>{% endfor %}</select></form><small>Checked {{e.last_checked[:10]}}</small></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty"><h3>No events match these filters</h3><p>Open Sources and run a scan. Some sites may block crawling or have no machine-readable event dates.</p><a class="button primary" href="/sources">Manage sources</a></div>{% endif %}</section><section class="quick-checks"><h2>Before a busy shift</h2><p>Access changes can alter trade even when an event looks promising. These live pages are quick manual checks.</p><div><a href="https://www.allconferencealert.com/oxford" target="_blank" rel="noopener">Oxford conference listings ↗</a><a href="https://www.oxfordbus.co.uk/service-updates" target="_blank" rel="noopener">Oxford Bus updates ↗</a><a href="https://www.gwr.com/travel-information/travel-updates/planned-engineering" target="_blank" rel="noopener">GWR planned works ↗</a><a href="https://www.nationalrail.co.uk/disruptions/" target="_blank" rel="noopener">National Rail disruptions ↗</a></div></section></main><div class="statusbar"><span>38 Cornmarket Street, Oxford OX1 3HA</span><span>Public event signals · Verify with organisers</span></div></div></div><script>const rows=[...document.querySelectorAll('tr[data-date]')], counts={};rows.forEach(r=>counts[r.dataset.date]=(counts[r.dataset.date]||0)+1);const dates=Object.keys(counts).slice(0,14);document.getElementById('calendar').innerHTML=dates.map(d=>'<div><b>'+d.slice(8)+'</b><small>'+new Date(d+'T12:00:00').toLocaleDateString('en-GB',{month:'short',weekday:'short'})+'</small><strong>'+counts[d]+'</strong></div>').join('');</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Busy Diary · The Plough Inn</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="The Plough Inn busy diary">
+        <span class="brand-mark">P</span>
+        <span><strong>The Plough Inn</strong><small>Oxford busy diary</small></span>
+      </a>
+      <p class="nav-label">WORKSPACE</p>
+      <nav class="side-nav" aria-label="Main navigation">
+        <a class="active" href="/" aria-current="page"><span class="nav-icon">◫</span> Events</a>
+        <a href="/sources"><span class="nav-icon">⌁</span> Sources</a>
+      </nav>
+      <div class="sidebar-note">
+        <span class="sidebar-note-icon">⌖</span>
+        <span>38 Cornmarket Street<br><small>Oxford OX1 3HA</small></span>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="breadcrumb">Workspace <span>/</span> <strong>Events</strong></div>
+        <span class="topbar-badge"><i></i> Local diary</span>
+      </header>
+
+      <main>
+        <section class="page-intro">
+          <div>
+            <p class="eyebrow">THE PLOUGH INN · OXFORD</p>
+            <h1>Plan for the rush.</h1>
+            <p>Public events that might bring people into town. Check each organiser before changing the pub diary.</p>
+          </div>
+          <a class="button button-soft" href="/sources">Manage sources <span aria-hidden="true">↗</span></a>
+        </section>
+
+        <section class="stats" aria-label="Diary overview">
+          <div class="stat-card"><span>Upcoming events</span><strong>{{stats.upcoming}}</strong><small>Across your public sources</small></div>
+          <div class="stat-card"><span>To review</span><strong>{{stats.review}}</strong><small>New dates to check</small></div>
+          <div class="stat-card"><span>Sources</span><strong>{{stats.sources}}</strong><small>Pages and calendar feeds</small></div>
+          <div class="stat-card stat-alert"><span>Source issues</span><strong>{{stats.errors}}</strong><small>Need a closer look</small></div>
+        </section>
+
+        {% if busy %}
+        <section class="section-block" aria-labelledby="watch-title">
+          <div class="section-heading">
+            <div><p class="eyebrow">LOCAL SIGNALS</p><h2 id="watch-title">Dates to watch</h2><p>Indicative demand near Cornmarket Street, based on the events below.</p></div>
+          </div>
+          <div class="watch-grid">
+            {% for d in busy[:6] %}
+            <article class="watch-card">
+              <div class="watch-card-top"><time datetime="{{d.date}}">{{d.date}}</time><span class="level">{{d.level}}</span></div>
+              <div class="watch-score"><strong>{{d.score}}</strong><span>/ 100</span></div>
+              <div class="meter" role="img" aria-label="Signal {{d.score}} out of 100"><span style="width:{{d.score}}%"></span></div>
+              <p>{{d.count}} event{{'s' if d.count != 1 else ''}} · {{d.areas}}</p>
+              <small>{{d.reasons|join(' · ')}}</small>
+            </article>
+            {% endfor %}
+          </div>
+          {% if busy|length > 6 %}
+          <details class="more-dates"><summary>Show {{busy|length - 6}} more dates</summary><div class="watch-grid">
+            {% for d in busy[6:] %}
+            <article class="watch-card">
+              <div class="watch-card-top"><time datetime="{{d.date}}">{{d.date}}</time><span class="level">{{d.level}}</span></div>
+              <div class="watch-score"><strong>{{d.score}}</strong><span>/ 100</span></div>
+              <div class="meter" role="img" aria-label="Signal {{d.score}} out of 100"><span style="width:{{d.score}}%"></span></div>
+              <p>{{d.count}} event{{'s' if d.count != 1 else ''}} · {{d.areas}}</p>
+              <small>{{d.reasons|join(' · ')}}</small>
+            </article>
+            {% endfor %}
+          </div></details>
+          {% endif %}
+        </section>
+        {% endif %}
+
+        <section class="panel" aria-labelledby="events-title">
+          <div class="panel-heading">
+            <div><p class="eyebrow">YOUR DIARY</p><h2 id="events-title">Upcoming events</h2><p>Filter the leads, review their sources, and keep the dates that matter.</p></div>
+            <div class="actions">
+              <a class="button button-outline" href="/export.csv?{{request.query_string.decode()}}">Export CSV</a>
+              <a class="button button-outline" href="/export.ics?{{request.query_string.decode()}}">Export calendar</a>
+            </div>
+          </div>
+          <form class="filters" method="get">
+            <label>From<input type="date" name="from" value="{{filters.get('from',today)}}"></label>
+            <label>To<input type="date" name="to" value="{{filters.get('to','')}}"></label>
+            <label>Venue<input name="venue" placeholder="Search venue" value="{{filters.get('venue','')}}"></label>
+            <label>Type<select name="type"><option value="">All types</option>{% for t in ['conference','symposium','workshop','graduation','open doors','open day','home match','term date','access alert','festival','formal','performance','public event','other academic'] %}<option value="{{t}}" {% if filters.get('type')==t %}selected{% endif %}>{{t|title}}</option>{% endfor %}</select></label>
+            <label>Confidence<select name="confidence"><option value="">Any</option><option value="0.8" {% if filters.get('confidence')=='0.8' %}selected{% endif %}>High</option><option value="0.6" {% if filters.get('confidence')=='0.6' %}selected{% endif %}>Medium+</option></select></label>
+            <label>Status<select name="status"><option value="">All</option>{% for s in ['new','approved','ignored'] %}<option value="{{s}}" {% if filters.get('status')==s %}selected{% endif %}>{{s|title}}</option>{% endfor %}</select></label>
+            <button class="button button-primary" type="submit">Apply filters</button>
+          </form>
+
+          {% if events %}
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Date</th><th>Event</th><th>Venue</th><th>Type</th><th>Signal</th><th>Review</th></tr></thead>
+              <tbody>
+                {% for e in events %}
+                <tr>
+                  <td class="date-cell" data-label="Date"><strong>{{e.start[:10]}}</strong>{% if e.end and e.end[:10] != e.start[:10] %}<small>to {{e.end[:10]}}</small>{% elif 'T' in e.start %}<small>{{e.start[11:16]}}</small>{% endif %}</td>
+                  <td class="event-cell" data-label="Event"><a href="{{e.source_url}}" target="_blank" rel="noopener">{{e.title}} <span aria-hidden="true">↗</span></a><small>{{e.organiser or ''}}{% if e.attendance %} · Published capacity {{e.attendance}}{% endif %}</small>{% if e.change_note %}<span class="change">{{e.change_note}}</span>{% endif %}</td>
+                  <td data-label="Venue">{{e.venue or 'Unknown'}}</td>
+                  <td data-label="Type"><span class="type-pill">{{e.event_type}}</span></td>
+                  <td data-label="Signal"><strong class="signal">{{(e.relevance*100)|round|int}}%</strong><small>{{(e.confidence*100)|round|int}}% confidence</small></td>
+                  <td data-label="Review"><form method="post" action="/events/{{e.id}}/status"><select name="status" aria-label="Review status for {{e.title}}" onchange="this.form.submit()">{% for s in ['new','approved','ignored'] %}<option value="{{s}}" {% if e.status==s %}selected{% endif %}>{{s|title}}</option>{% endfor %}</select></form><small>Checked {{e.last_checked[:10]}}</small></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="empty"><span class="empty-icon">◇</span><h3>No events match these filters</h3><p>Run a scan in Sources, or widen the dates above.</p><a class="button button-primary" href="/sources">Manage sources</a></div>
+          {% endif %}
+        </section>
+
+        <section class="quick-checks">
+          <div><p class="eyebrow">BEFORE A BUSY SHIFT</p><h2>Check what else is happening</h2><p>Travel changes and additional listings can alter the picture.</p></div>
+          <div class="quick-links">
+            <a href="https://www.allconferencealert.com/oxford" target="_blank" rel="noopener">Oxford conference listings ↗</a>
+            <a href="https://www.oxfordbus.co.uk/service-updates" target="_blank" rel="noopener">Oxford Bus updates ↗</a>
+            <a href="https://www.gwr.com/travel-information/travel-updates/planned-engineering" target="_blank" rel="noopener">GWR planned works ↗</a>
+            <a href="https://www.nationalrail.co.uk/disruptions/" target="_blank" rel="noopener">National Rail disruptions ↗</a>
+          </div>
+        </section>
+      </main>
+      <footer>Public event signals · Verify dates and venues with organisers</footer>
+    </div>
+  </div>
+</body>
+</html>

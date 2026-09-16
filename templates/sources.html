@@ -1,1 +1,138 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{% if scan_running %}<meta http-equiv="refresh" content="15">{% endif %}<title>Sources · Oxford Conference Tracker</title><link rel="stylesheet" href="/static/style.css"></head><body><div class="desktop"><div class="window"><div class="titlebar"><div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div><span class="window-title">The Plough Inn — Sources</span><span class="titlebar-spacer"></span></div><header><div><span class="eyebrow">THE PLOUGH INN · OXFORD</span><h1>Sources</h1><p>Manage public event pages. Scans obey robots.txt and pause between requests to each site.</p></div><nav><a href="/">Events</a><a class="active" href="/sources">Sources</a></nav></header><main><section class="panel"><div class="section-head"><div><h2>Source health</h2><p>Errors stay visible so you can update a page URL or disable a source.{% if scan_running %} <strong>Scan in progress — this page refreshes every 15 seconds.</strong>{% endif %}</p></div><form method="post" action="/scan"><button class="primary" {% if scan_running %}disabled{% endif %}>{{"Scan in progress" if scan_running else "Scan all enabled sources"}}</button></form></div><form method="post" action="/sources" class="add-source"><input name="name" placeholder="Source name" required><input name="url" type="url" placeholder="https://example.org/events" required><select name="kind" aria-label="Source reader">{% for kind in ["listing","fixtures","ceremonies","terms","theatre","access","major","science_festival","song_festival","symposia","conal_oxford","ical"] %}<option value="{{kind}}">{{"iCal" if kind=="ical" else kind|title}}</option>{% endfor %}</select><button>Add source</button></form><div class="sources">{% for s in sources %}<div class="source"><form method="post" action="/sources/{{s.id}}"><input name="name" value="{{s.name}}" aria-label="Source name"><input name="url" type="url" value="{{s.url}}" aria-label="Source URL"><select name="kind" aria-label="Source reader">{% for kind in ["listing","fixtures","ceremonies","terms","theatre","access","major","science_festival","song_festival","symposia","conal_oxford","ical"] %}<option value="{{kind}}" {% if s.kind==kind %}selected{% endif %}>{{"iCal" if kind=="ical" else kind|title}}</option>{% endfor %}</select><label class="check"><input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}> Enabled</label><button>Save</button></form><form method="post" action="/sources/{{s.id}}"><input type="hidden" name="action" value="scan"><button class="quiet">Scan</button></form><div class="health"><span class="health-tag {{s.health}}">{{s.health}}</span><small>Checked {{s.last_checked[:16] if s.last_checked else 'never'}} · {{s.pages_checked}} pages</small>{% if s.error %}<small class="error">{{s.error}}</small>{% endif %}</div>{% set links = calendar_links.get(s.id, []) %}{% if links %}<div class="calendar-links">{% set feeds = links|selectattr('kind','equalto','feed')|list %}{% set singles = links|selectattr('kind','equalto','event')|list %}{% for link in feeds %}<span>Calendar feed:</span> <a href="{{link.url}}" target="_blank" rel="noopener">{{link.label or 'Open feed'}}</a> <a href="{{link.url|replace('https://','webcal://')|replace('http://','webcal://')}}">Subscribe in Calendar</a>{% if link.url in source_urls %}<small>Already imported</small>{% else %}<form method="post" action="/sources"><input type="hidden" name="name" value="{{s.name}} calendar"><input type="hidden" name="url" value="{{link.url}}"><input type="hidden" name="kind" value="ical"><button class="quiet">Import feed</button></form>{% endif %}{% endfor %}{% if singles %}<small>{{singles|length}} individual calendar download{{'s' if singles|length != 1 else ''}} found</small>{% endif %}</div>{% endif %}</div>{% endfor %}</div></section></main><div class="statusbar"><span>38 Cornmarket Street, Oxford OX1 3HA</span><span>Sources checked politely</span></div></div></div></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if scan_running %}<meta http-equiv="refresh" content="15">{% endif %}
+  <title>Sources · The Plough Inn</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="The Plough Inn busy diary">
+        <span class="brand-mark">P</span>
+        <span><strong>The Plough Inn</strong><small>Oxford busy diary</small></span>
+      </a>
+      <p class="nav-label">WORKSPACE</p>
+      <nav class="side-nav" aria-label="Main navigation">
+        <a href="/"><span class="nav-icon">◫</span> Events</a>
+        <a class="active" href="/sources" aria-current="page"><span class="nav-icon">⌁</span> Sources</a>
+      </nav>
+      <div class="sidebar-note">
+        <span class="sidebar-note-icon">⌖</span>
+        <span>38 Cornmarket Street<br><small>Oxford OX1 3HA</small></span>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="breadcrumb">Workspace <span>/</span> <strong>Sources</strong></div>
+        <span class="topbar-badge"><i></i> Local diary</span>
+      </header>
+
+      <main>
+        <section class="page-intro">
+          <div>
+            <p class="eyebrow">SOURCE LIBRARY</p>
+            <h1>Keep the diary informed.</h1>
+            <p>Manage the public pages and calendars that supply your event leads. Scans obey site rules and pause between requests.</p>
+          </div>
+          <form method="post" action="/scan">
+            <button class="button button-primary" {% if scan_running %}disabled{% endif %}>{{"Scan in progress" if scan_running else "Scan all enabled sources"}}</button>
+          </form>
+        </section>
+
+        {% if scan_running %}<div class="scan-banner"><span class="scan-spinner"></span> Scan in progress. This page updates every 15 seconds.</div>{% endif %}
+
+        <section class="panel add-panel" aria-labelledby="add-title">
+          <div class="panel-heading"><div><p class="eyebrow">EXPAND COVERAGE</p><h2 id="add-title">Add a source</h2><p>Use a public event page or a calendar feed.</p></div></div>
+          <form method="post" action="/sources" class="add-source">
+            <label>Name<input name="name" placeholder="e.g. Oxford event venue" required></label>
+            <label>Public URL<input name="url" type="url" placeholder="https://example.org/events" required></label>
+            <label>Reader<select name="kind" aria-label="Source reader">{% for kind in ["listing","ical","fixtures","ceremonies","terms","theatre","access","major","science_festival","song_festival","symposia","conal_oxford"] %}<option value="{{kind}}">{{"iCal" if kind=="ical" else kind|replace('_',' ')|title}}</option>{% endfor %}</select></label>
+            <button class="button button-primary" type="submit">Add source</button>
+          </form>
+        </section>
+
+        <section class="panel source-panel" aria-labelledby="sources-title">
+          <div class="panel-heading">
+            <div><p class="eyebrow">LIVE STATUS</p><h2 id="sources-title">Your sources <span class="heading-count">{{sources|length}}</span></h2><p>Check errors here when a page changes or stops allowing access.</p></div>
+            <label class="source-search"><span class="sr-only">Search sources</span><input id="source-search" type="search" placeholder="Search sources or URLs…" autocomplete="off"></label>
+          </div>
+          <div class="source-list" id="source-list">
+            {% for s in sources %}
+            <article class="source-card" data-search="{{(s.name ~ ' ' ~ s.url ~ ' ' ~ s.health)|lower}}">
+              <div class="source-card-head">
+                <div>
+                  <h3>{{s.name}}</h3>
+                  <p class="source-url">{{s.url}}</p>
+                </div>
+                <span class="health-tag health-{{s.health.split(' · ')[0]}}">{{s.health}}</span>
+              </div>
+              <div class="source-meta">
+                <span>Checked {{s.last_checked[:16].replace('T',' ') if s.last_checked else 'never'}}</span>
+                <span>{{s.pages_checked}} page{{'s' if s.pages_checked != 1 else ''}}</span>
+                {% if s.error %}<span class="source-error">{{s.error}}</span>{% endif %}
+              </div>
+              <div class="source-controls">
+                <form method="post" action="/sources/{{s.id}}" class="source-edit">
+                  <label><span class="sr-only">Source name</span><input name="name" value="{{s.name}}" aria-label="Source name"></label>
+                  <label class="url-field"><span class="sr-only">Source URL</span><input name="url" type="url" value="{{s.url}}" aria-label="Source URL"></label>
+                  <label><span class="sr-only">Source reader</span><select name="kind" aria-label="Source reader">{% for kind in ["listing","ical","fixtures","ceremonies","terms","theatre","access","major","science_festival","song_festival","symposia","conal_oxford"] %}<option value="{{kind}}" {% if s.kind==kind %}selected{% endif %}>{{"iCal" if kind=="ical" else kind|replace('_',' ')|title}}</option>{% endfor %}</select></label>
+                  <label class="toggle"><input type="checkbox" name="enabled" {% if s.enabled %}checked{% endif %}><span>Enabled</span></label>
+                  <button class="button button-outline" type="submit">Save</button>
+                </form>
+                <form method="post" action="/sources/{{s.id}}">
+                  <input type="hidden" name="action" value="scan">
+                  <button class="button button-soft" type="submit">Scan</button>
+                </form>
+              </div>
+              {% set links = calendar_links.get(s.id, []) %}
+              {% if links %}
+              <div class="calendar-links">
+                {% set feeds = links|selectattr('kind','equalto','feed')|list %}
+                {% set singles = links|selectattr('kind','equalto','event')|list %}
+                {% for link in feeds %}
+                <span>Calendar feed</span>
+                <a href="{{link.url}}" target="_blank" rel="noopener">{{link.label or 'Open feed'}} ↗</a>
+                <a href="{{link.url|replace('https://','webcal://')|replace('http://','webcal://')}}">Subscribe in Calendar ↗</a>
+                {% if link.url in source_urls %}
+                <small>Already imported</small>
+                {% else %}
+                <form method="post" action="/sources">
+                  <input type="hidden" name="name" value="{{s.name}} calendar">
+                  <input type="hidden" name="url" value="{{link.url}}">
+                  <input type="hidden" name="kind" value="ical">
+                  <button class="button button-outline" type="submit">Import feed</button>
+                </form>
+                {% endif %}
+                {% endfor %}
+                {% if singles %}<small>{{singles|length}} individual calendar download{{'s' if singles|length != 1 else ''}} found</small>{% endif %}
+              </div>
+              {% endif %}
+            </article>
+            {% endfor %}
+          </div>
+          <p class="search-empty" id="search-empty" hidden>No sources match that search.</p>
+        </section>
+      </main>
+      <footer>Sources are checked politely · Review all event details with organisers</footer>
+    </div>
+  </div>
+  <script>
+    const search = document.getElementById('source-search');
+    const cards = [...document.querySelectorAll('.source-card')];
+    search.addEventListener('input', () => {
+      const query = search.value.trim().toLowerCase();
+      let visible = 0;
+      cards.forEach(card => {
+        const match = card.dataset.search.includes(query);
+        card.hidden = !match;
+        if (match) visible++;
+      });
+      document.getElementById('search-empty').hidden = visible !== 0;
+    });
+  </script>
+</body>
+</html>
