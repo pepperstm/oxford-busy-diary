@@ -264,4 +264,40 @@ def symposia(html, url):
     return [event]
 
 
-ADAPTERS = {'fixtures': fixtures, 'ceremonies': ceremonies, 'terms': terms, 'theatre': theatre, 'access': access, 'major': major, 'science_festival': science_festival, 'song_festival': song_festival, 'symposia': symposia}
+def conal_oxford(html, url):
+    """Low-confidence leads from a public Oxford conference directory."""
+    soup = BeautifulSoup(html, 'html.parser')
+    month = None
+    events = []
+    for row in soup.find_all('tr'):
+        heading = row.find('strong')
+        if heading and re.fullmatch(r'[A-Za-z]+ 20\d{2}', heading.get_text(' ', strip=True)):
+            month = heading.get_text(' ', strip=True)
+            continue
+        title_link = row.select_one('#searchName a[href]')
+        place = row.select_one('#searchPlace')
+        if not month or not title_link or not place:
+            continue
+        if not re.search(r'\bOxford\b', place.get_text(' ', strip=True)):
+            continue
+        mode = row.select_one('.online-in-person-badge')
+        if mode and mode.get_text(' ', strip=True).lower() == 'online':
+            continue
+        day_cell = row.find('td')
+        day_match = re.search(r'\d{1,2}', day_cell.get_text(' ', strip=True)) if day_cell else None
+        if not day_match:
+            continue
+        day = _future_date(f'{day_match.group()} {month}')
+        if not day:
+            continue
+        title = title_link.get_text(' ', strip=True)
+        kind = 'symposium' if re.search(r'\bsymposium\b', title, re.I) else 'workshop' if re.search(r'\bworkshop\b', title, re.I) else 'conference'
+        event = _base(title, day, 'Oxford (venue unverified)', urljoin(url, title_link['href']), kind,
+                      'Third-party directory; date and physical Oxford venue need organiser confirmation')
+        event['organiser'] = 'Unverified directory listing'
+        event['evidence'] = 'directory'
+        events.append(event)
+    return events
+
+
+ADAPTERS = {'fixtures': fixtures, 'ceremonies': ceremonies, 'terms': terms, 'theatre': theatre, 'access': access, 'major': major, 'science_festival': science_festival, 'song_festival': song_festival, 'symposia': symposia, 'conal_oxford': conal_oxford}

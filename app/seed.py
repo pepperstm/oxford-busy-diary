@@ -85,6 +85,7 @@ SOURCES = [
 ('IF Oxford Science and Ideas Festival','https://if-oxford.com/events/','science_festival'),
 ('Oxford International Song Festival','https://oxfordsong.org/','song_festival'),
 ('Oxford Symposia','https://www.oxfordsymposia.co.uk/event-list','symposia'),
+('Conal Conference Alerts Oxford','https://conferencealerts.com/city-listing?city=Oxford','conal_oxford'),
 ]
 SOURCES += [(name if name.endswith('College') else f'{name} College',f'https://www.{host}/events/','listing') for name,host in (line.split('|') for line in COLLEGES.splitlines())]
 

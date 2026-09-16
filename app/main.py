@@ -30,6 +30,7 @@ SESSION = requests.Session()
 SESSION.headers.update({'User-Agent': AGENT, 'Accept': 'text/html,application/ld+json'})
 last_request = {}
 robots_cache = {}
+robots_warnings = {}
 scan_lock = threading.Lock()
 TYPES = {'conference': r'conference|congress|summit|convention|forum', 'symposium': r'symposium|colloquium', 'workshop': r'workshop|masterclass|training|summer school', 'graduation': r'graduation|degree ceremony', 'open doors': r'open doors|heritage open', 'open day': r'open day|open evening|applicant day|visiting day', 'home match': r'home match|oxford united v ', 'term date': r'term start|term end', 'festival': r'festival|carnival|fair|fayre', 'formal': r'ball|banquet|dinner|alumni weekend|reunion', 'performance': r'concert|performance|theatre|musical|comedy|opera|show|orchestra|symphony|recital|choir|choral|philharmonic', 'public event': r'exhibition|tour|community event|market|parade|celebration|race|marathon|pride', 'other academic': r'lecture|seminar|research day|academic event'}
 LINK_HINT = re.compile('|'.join(TYPES.values()) + r'|/events?/|/what.s.on/', re.I)
@@ -83,8 +84,12 @@ def allowed(url):
         rp.set_url(root + '/robots.txt')
         try:
             response = SESSION.get(root + '/robots.txt', timeout=12)
-            if response.status_code == 404:
+            if 400 <= response.status_code < 500 and response.status_code != 429:
+                # RFC 9309 §2.3.1.3 treats a 4xx robots file as unavailable.
+                # The requested page is still fetched normally and may itself refuse access.
                 rp.parse([])
+                if response.status_code not in (404, 410):
+                    robots_warnings[root] = f'robots.txt unavailable (HTTP {response.status_code})'
             elif response.ok:
                 rp.parse(response.text.splitlines())
             else:
@@ -218,11 +223,15 @@ def key_for(event):
 def save_event(db, event, source_id):
     key = key_for(event)
     old = db.execute('SELECT * FROM events WHERE dedupe_key=?', (key,)).fetchone()
-    event['confidence'] = {'structured': .9, 'adapter': .8, 'html': .65}[event['evidence']]
+    event['confidence'] = {'structured': .9, 'adapter': .8, 'html': .65, 'directory': .45}[event['evidence']]
     event['relevance'] = {'conference': 1, 'symposium': .9, 'graduation': .95, 'open doors': .9, 'open day': .85, 'home match': .9, 'term date': .5, 'festival': .85, 'formal': .75, 'performance': .7, 'public event': .6, 'access alert': 0, 'workshop': .7, 'other academic': .35}[event['event_type']]
     if event['attendance']:
         event['relevance'] = min(1, event['relevance'] + .1)
     fields = ['title','start','end','venue','organiser','event_type','attendance','public_clue','source_url','confidence','relevance']
+    if old and (old['confidence'] or 0) > event['confidence'] and old['source_url'] != event['source_url']:
+        db.execute('UPDATE events SET last_checked=? WHERE id=?', (now(), old['id']))
+        db.execute('INSERT INTO sightings(event_id,source_id,url,seen_at) VALUES(?,?,?,?) ON CONFLICT(event_id,url) DO UPDATE SET seen_at=excluded.seen_at', (old['id'],source_id,event['source_url'],now()))
+        return
     if old:
         changed = [f for f in fields if old[f] != event[f]]
         note = 'Changed: ' + ', '.join(changed) if changed else old['change_note']
@@ -279,10 +288,15 @@ def scan_source(source_id):
             health = f'ok · {found} events' if found else 'empty · no dated events'
             if skipped:
                 health += f' · {len(skipped)} page(s) skipped'
+            root = f'{urlparse(source["url"]).scheme}://{urlparse(source["url"]).netloc}'
+            if root in robots_warnings:
+                health += ' · ' + robots_warnings[root]
             db.execute('UPDATE sources SET last_checked=?,last_success=?,health=?,error=?,pages_checked=? WHERE id=?',
                        (now(),now(),health,'; '.join(skipped[:2])[:400] if skipped else None,count,source_id))
         except Exception as e:
-            db.execute('UPDATE sources SET last_checked=?,health=?,error=?,pages_checked=? WHERE id=?', (now(),'blocked' if 'robots' in str(e).lower() else 'error',str(e)[:400],count,source_id))
+            code = getattr(getattr(e, 'response', None), 'status_code', None)
+            health = 'blocked' if code == 403 or 'robots' in str(e).lower() else 'error'
+            db.execute('UPDATE sources SET last_checked=?,health=?,error=?,pages_checked=? WHERE id=?', (now(),health,str(e)[:400],count,source_id))
         db.commit()
 
 
