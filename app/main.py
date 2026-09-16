@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 from flask import Flask, Response, abort, redirect, render_template, request, url_for
 
-from .seed import SOURCES
+from .seed import SOURCES, SOURCE_URL_FIXES
 from .adapters import ADAPTERS
 
 app = Flask(__name__, template_folder='../templates', static_folder='../static')
@@ -31,8 +31,9 @@ SESSION.headers.update({'User-Agent': AGENT, 'Accept': 'text/html,application/ld
 last_request = {}
 robots_cache = {}
 scan_lock = threading.Lock()
-TYPES = {'conference': r'conference|congress|summit|convention|forum', 'symposium': r'symposium|colloquium', 'workshop': r'workshop|masterclass|training|summer school', 'graduation': r'graduation|degree ceremony', 'open doors': r'open doors|heritage open', 'open day': r'open day|open evening|applicant day|visiting day', 'home match': r'home match|oxford united v ', 'term date': r'term start|term end', 'festival': r'festival|carnival|fair|fayre', 'performance': r'concert|performance|theatre|musical|comedy|opera|show', 'public event': r'exhibition|tour|community event|market|parade|celebration|race|marathon|pride', 'other academic': r'lecture|seminar|research day|academic event'}
+TYPES = {'conference': r'conference|congress|summit|convention|forum', 'symposium': r'symposium|colloquium', 'workshop': r'workshop|masterclass|training|summer school', 'graduation': r'graduation|degree ceremony', 'open doors': r'open doors|heritage open', 'open day': r'open day|open evening|applicant day|visiting day', 'home match': r'home match|oxford united v ', 'term date': r'term start|term end', 'festival': r'festival|carnival|fair|fayre', 'formal': r'ball|banquet|dinner|alumni weekend|reunion', 'performance': r'concert|performance|theatre|musical|comedy|opera|show|orchestra|symphony|recital|choir|choral|philharmonic', 'public event': r'exhibition|tour|community event|market|parade|celebration|race|marathon|pride', 'other academic': r'lecture|seminar|research day|academic event'}
 LINK_HINT = re.compile('|'.join(TYPES.values()) + r'|/events?/|/what.s.on/', re.I)
+CARD_DATE = re.compile(r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+(?:20)?\d{2})?\b', re.I)
 
 
 def conn():
@@ -50,6 +51,11 @@ def init_db():
         CREATE TABLE IF NOT EXISTS sightings (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, source_id INTEGER NOT NULL, url TEXT NOT NULL, seen_at TEXT NOT NULL, UNIQUE(event_id,url));
         CREATE INDEX IF NOT EXISTS idx_events_start ON events(start);
         ''')
+        # Migrate only untouched seed URLs; preserve any address edited by Graham.
+        for name, old_url, new_url in SOURCE_URL_FIXES:
+            db.execute('UPDATE sources SET url=?,health="new",error=NULL WHERE name=? AND url=?', (new_url,name,old_url))
+        db.execute('UPDATE sources SET name="Oxford Events",url="https://events.ox.ac.uk/events",health="new",error=NULL WHERE name="Oxford Talks" AND url="https://talks.ox.ac.uk/"')
+        db.execute('UPDATE sources SET name="University College" WHERE name="University College College"')
         db.executemany('INSERT OR IGNORE INTO sources(name,url,kind) VALUES(?,?,?)', SOURCES)
 
 
@@ -108,7 +114,7 @@ def date_value(value):
         raw = str(value)
         dt = dateparser.isoparse(raw) if re.match(r'^\d{4}-\d{2}-\d{2}', raw) else dateparser.parse(raw, fuzzy=False, dayfirst=True)
         if dt and dt.year >= datetime.now().year - 1:
-            return dt.isoformat(timespec='minutes')
+            return dt.isoformat(timespec='minutes') if re.search(r'\d{1,2}:\d{2}', raw) else dt.date().isoformat()
     except (ValueError, TypeError, OverflowError):
         pass
     return None
@@ -123,9 +129,11 @@ def plain(value):
 
 
 def classify(title, description=''):
-    text = (title + ' ' + description).lower()
     for kind, pattern in TYPES.items():
-        if re.search(pattern, text, re.I):
+        if re.search(pattern, title, re.I):
+            return kind
+    for kind, word in [('conference','conference'),('symposium','symposium'),('workshop','workshop'),('graduation','graduation'),('open day','open day'),('festival','festival'),('formal','dinner'),('performance','concert'),('public event','marathon')]:
+        if re.search(r'\b' + word + r'\b', description, re.I):
             return kind
     return 'other academic'
 
@@ -159,18 +167,28 @@ def extract(html, url, source):
                     found.append(dict(title=title, start=start, end=date_value(item.get('endDate')), venue=plain(item.get('location')) or source['name'], organiser=plain(item.get('organizer')) or source['name'], event_type=classify(title, desc), attendance=attendance, public_clue=plain(item.get('eventAttendanceMode') or item.get('isAccessibleForFree')), source_url=urljoin(url, plain(item.get('url')) or url), evidence='structured'))
         except (ValueError, TypeError):
             pass
-    # A conservative HTML fallback: only event/article cards with a machine-readable time element.
-    for card in soup.select('article, .event, .event-card, [class*="event-item"]'):
-        t = card.find('time', datetime=True)
-        heading = card.find(['h1','h2','h3','h4'])
-        if not t or not heading:
+    # Public event cards often print a date instead of a machine-readable time.
+    for card in soup.select('article, .event, .event-card, [class*="event-item"], .oxfcms-listing-item--event, .listing-item-oxford-event'):
+        if len(card.get_text(' ', strip=True)) > 1200:
             continue
-        start = date_value(t.get('datetime'))
+        t = card.find('time', datetime=True)
+        heading = card.find(['h2','h3','h4'])
+        if not heading:
+            continue
+        label = t.get('datetime') if t else None
+        if not label:
+            match = CARD_DATE.search(card.get_text(' ', strip=True))
+            label = match.group() if match else None
+        start = date_value(label)
         title = heading.get_text(' ', strip=True)
         if not start or not title:
             continue
         a = heading.find('a', href=True) or card.find('a', href=True)
-        found.append(dict(title=title, start=start, end=None, venue=source['name'], organiser=source['name'], event_type=classify(title), attendance=None, public_clue='', source_url=urljoin(url, a['href']) if a else url, evidence='html'))
+        kind = classify(title, card.get_text(' ', strip=True)[:300])
+        if kind == 'other academic' and 'Theatre' in source['name']:
+            kind = 'public event'
+        found.append(dict(title=title, start=start, end=None, venue=source['name'], organiser=source['name'], event_type=kind, attendance=None, public_clue='', source_url=urljoin(url, a['href']) if a else url, evidence='html'))
+    found = list({(e['title'].lower(),e['start'][:10]):e for e in found}.values())
     return found, soup
 
 
@@ -185,7 +203,7 @@ def save_event(db, event, source_id):
     key = key_for(event)
     old = db.execute('SELECT * FROM events WHERE dedupe_key=?', (key,)).fetchone()
     event['confidence'] = {'structured': .9, 'adapter': .8, 'html': .65}[event['evidence']]
-    event['relevance'] = {'conference': 1, 'symposium': .9, 'graduation': .95, 'open doors': .9, 'open day': .85, 'home match': .9, 'term date': .5, 'festival': .85, 'performance': .7, 'public event': .6, 'access alert': 0, 'workshop': .7, 'other academic': .35}[event['event_type']]
+    event['relevance'] = {'conference': 1, 'symposium': .9, 'graduation': .95, 'open doors': .9, 'open day': .85, 'home match': .9, 'term date': .5, 'festival': .85, 'formal': .75, 'performance': .7, 'public event': .6, 'access alert': 0, 'workshop': .7, 'other academic': .35}[event['event_type']]
     if event['attendance']:
         event['relevance'] = min(1, event['relevance'] + .1)
     fields = ['title','start','end','venue','organiser','event_type','attendance','public_clue','source_url','confidence','relevance']
@@ -233,7 +251,8 @@ def scan_source(source_id):
                         if urlparse(href).netloc == urlparse(source['url']).netloc and LINK_HINT.search(href + ' ' + a.get_text(' ', strip=True)) and href not in seen and href not in pages:
                             pages.append(href)
                 db.commit()
-            db.execute('UPDATE sources SET last_checked=?,last_success=?,health=?,error=NULL,pages_checked=? WHERE id=?', (now(),now(),f'ok · {found} events',count,source_id))
+            health = f'ok · {found} events' if found else 'empty · no dated events'
+            db.execute('UPDATE sources SET last_checked=?,last_success=?,health=?,error=NULL,pages_checked=? WHERE id=?', (now(),now(),health,count,source_id))
         except Exception as e:
             db.execute('UPDATE sources SET last_checked=?,health=?,error=?,pages_checked=? WHERE id=?', (now(),'blocked' if 'robots' in str(e).lower() else 'error',str(e)[:400],count,source_id))
         db.commit()
@@ -291,7 +310,8 @@ def busy_days(events):
         day = event['start'][:10]
         weight, area = proximity(event)
         item = days.setdefault(day, {'date': day, 'score': 0, 'count': 0, 'reasons': [], 'areas': set()})
-        item['score'] += round(42 * event['relevance'] * weight * event['confidence'])
+        base = 85 if event['event_type'] == 'home match' else 55
+        item['score'] += round(base * event['relevance'] * weight * event['confidence'])
         item['count'] += 1
         item['areas'].add(area)
         if len(item['reasons']) < 3:
@@ -316,7 +336,7 @@ def index():
 def sources():
     with conn() as db:
         rows = db.execute('SELECT * FROM sources ORDER BY name').fetchall()
-    return render_template('sources.html', sources=rows)
+    return render_template('sources.html', sources=rows, scan_running=scan_lock.locked())
 
 
 @app.post('/sources')

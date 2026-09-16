@@ -8,7 +8,7 @@ A local diary aid for Graham at The Plough Inn, 38 Cornmarket Street, Oxford OX1
 2. Unzip this package into a folder.
 3. Copy `.env.example` to `.env`. Set a real contact address in `USER_AGENT` so site operators can reach you.
 4. From that folder, run `docker compose up -d --build`.
-5. Open `http://localhost:8080`, open **Sources**, and start a scan. The first scan can take a while because requests are deliberately spaced out. Sources with a robots block or a changed page are shown in Source health.
+5. Open `http://localhost:8080`, open **Sources**, and start a scan. The first scan can take a while because requests are deliberately spaced out. Sources with a robots block or a changed page are shown in Source health. A source marked **empty** was reachable but produced no future dated events, which may be normal or may mean its page layout changed.
 6. When finished, run `docker compose down`. Your data stays in `./data/tracker.sqlite3`.
 
 If you leave the app running, it scans again every `SCAN_INTERVAL_HOURS` (default 24). Starting the app does not itself start a scan; use the button when you need fresh information.
@@ -24,7 +24,7 @@ A public repository needs no Git authentication for the remote build. If the rep
 
 ## What is tracked
 
-- **Generic public events:** Schema.org `Event` JSON-LD and event cards with machine-readable `<time datetime>` tags. The crawler follows event-related links on the same host, up to `MAX_PAGES_PER_SOURCE`.
+- **Generic public events:** Schema.org `Event` JSON-LD and public event cards with machine-readable dates or clearly printed dates. The crawler follows event-related links on the same host, up to `MAX_PAGES_PER_SOURCE`.
 - **Dedicated readers:** the official Oxford United men's fixtures page (home games at the Kassam only), Oxford degree ceremonies (in-person dates only), Oxford main term and full-term dates, New Theatre Oxford listings, and the county's Oxford-related large-public-event road notices. Readers use public HTML and may need updates when a site changes its layout.
 - **Review and exports:** filter by date, venue, type, confidence and status; approve or ignore leads; export CSV or an all-day ICS calendar. The page records source URL and when it was last checked. Rescans flag changed details and return a changed approved item to New.
 - **Dates to watch:** an indicative 0–100 signal combines distinct events on the same date. City-centre venues receive more weight; Oxford United home games remain strong signals despite the stadium's distance. Road notices appear as access alerts and do not increase the busy score. This score is a triage aid, not a prediction of sales or attendance.
@@ -34,13 +34,13 @@ Attendance is recorded only when a page publishes a capacity figure, which can d
 
 ## Sources and configuration
 
-The registry starts with Oxford colleges, departments and institutes, city listings, nearby theatres, Oxford United, Oxford Brookes graduation, Oxford Pride, May Morning and other public pages. It is a starting list, not a guarantee that every URL is a working calendar. You can edit URLs, enable or disable sources and choose a reader on the **Sources** page. New seed sources are added to an existing database on upgrade without replacing edited entries.
+The registry starts with Oxford Events (the University’s current central listing), Oxford colleges, departments and institutes, city listings, nearby theatres, Oxford United, Oxford Brookes graduation, Oxford Pride, May Morning and other public pages. It is a starting list, not a guarantee that every URL is a working calendar. You can edit URLs, enable or disable sources and choose a reader on the **Sources** page. New seed sources are added to an existing database on upgrade without replacing edited entries.
 
 See `.env.example`. `REQUEST_DELAY_SECONDS` has a minimum of 1 second. `MAX_PAGES_PER_SOURCE` is capped at 30; set it to 3 for a faster first pass. `SCAN_INTERVAL_HOURS` controls rescans while the app is running.
 
 ## Crawling limits
 
-The crawler checks robots.txt before fetching a page, uses a descriptive user agent, spaces requests per host, caps pages and reports errors. It does not log in, solve CAPTCHAs, bypass paywalls or attempt to discover private bookings. Site terms may impose further restrictions even when robots.txt allows access: check terms before enabling a source and disable any source that prohibits this use. Avoid reposting event descriptions or using this tool as a substitute for organisers' listings.
+The crawler checks robots.txt before fetching a page, uses a descriptive user agent, spaces requests per host, caps pages and reports errors. It does not log in, solve CAPTCHAs, bypass paywalls or attempt to discover private bookings. A 403/406 response to robots.txt is treated as blocked; the app does not try another route around it. Site terms may impose further restrictions even when robots.txt allows access: check terms before enabling a source and disable any source that prohibits this use. Avoid reposting event descriptions or using this tool as a substitute for organisers' listings.
 
 ## Development
 

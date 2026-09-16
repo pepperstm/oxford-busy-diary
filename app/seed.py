@@ -1,5 +1,5 @@
 # Public starting points. Individual calendars can be substituted in the Sources screen.
-COLLEGES = '''All Souls|all-souls.ox.ac.uk
+COLLEGES = '''All Souls|asc.ox.ac.uk
 Balliol|balliol.ox.ac.uk
 Brasenose|bnc.ox.ac.uk
 Christ Church|chch.ox.ac.uk
@@ -55,7 +55,7 @@ SOURCES = [
 ('Oxford Pride','https://oxfordpride.uk/pride-events/','listing'),
 ('May Morning','https://www.oxford.gov.uk/maymorning','listing'),
 ('Oxford outreach events','https://www.ox.ac.uk/admissions/undergraduate/access-oxford/outreach-events','listing'),
-('Oxford Talks','https://talks.ox.ac.uk/','listing'),
+('Oxford Events','https://events.ox.ac.uk/events','listing'),
 ('Conference Oxford','https://conference-oxford.com/','listing'),
 ('Oxford Brookes events','https://www.brookes.ac.uk/about-brookes/events','listing'),
 ('Bodleian Libraries events','https://visit.bodleian.ox.ac.uk/events','listing'),
@@ -79,4 +79,17 @@ SOURCES = [
 ('History of Science Museum','https://www.hsm.ox.ac.uk/events','listing'),
 ('Sheldonian Theatre','https://www.sheldonian.ox.ac.uk/events','listing'),
 ]
-SOURCES += [(f'{name} College',f'https://www.{host}/events/','listing') for name,host in (line.split('|') for line in COLLEGES.splitlines())]
+SOURCES += [(name if name.endswith('College') else f'{name} College',f'https://www.{host}/events/','listing') for name,host in (line.split('|') for line in COLLEGES.splitlines())]
+
+# Changes to mistaken seed addresses. Only rows still using the original URL are migrated.
+SOURCE_URL_FIXES = [
+('All Souls College','https://www.all-souls.ox.ac.uk/events/','https://www.asc.ox.ac.uk/events'),
+('Bodleian Libraries events','https://visit.bodleian.ox.ac.uk/events','https://visit.bodleian.ox.ac.uk/events-exhibitions?direct=true'),
+('Nuffield College','https://www.nuffield.ox.ac.uk/events/','https://www.nuffield.ox.ac.uk/news-events/events-and-seminars/'),
+('Pembroke College','https://www.pmb.ox.ac.uk/events/','https://www.pmb.ox.ac.uk/news-events'),
+('Corpus Christi College','https://www.ccc.ox.ac.uk/events/','https://www.ccc.ox.ac.uk/alumni/events-and-reunions'),
+('Social Sciences Division','https://www.socsci.ox.ac.uk/events','https://www.socsci.ox.ac.uk/'),
+('Oxford Botanic Garden and Arboretum','https://www.obga.ox.ac.uk/events','https://www.obga.ox.ac.uk/whats-on'),
+]
+FIXED_URLS = {(name, old): new for name, old, new in SOURCE_URL_FIXES}
+SOURCES = [(name, FIXED_URLS.get((name, url), url), kind) for name, url, kind in SOURCES]

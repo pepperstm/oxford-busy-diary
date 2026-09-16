@@ -130,6 +130,7 @@ def access(html, url):
     seen = set()
     for link in soup.find_all('a', href=True):
         title = link.get_text(' ', strip=True)
+        title = re.sub(r'^(Oxford Half Marathon)\s+\1\b', r'\1', title, flags=re.I)
         if not re.search(r'\bOxford\b|Broad Street|Cornmarket|St Giles', title, re.I):
             continue
         match = re.search(r'\b\d{1,2}\s+[A-Za-z]+\s+20\d{2}\b', title)
