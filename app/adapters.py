@@ -101,25 +101,26 @@ def terms(html, url):
 def theatre(html, url):
     soup = BeautifulSoup(html, 'html.parser')
     results = []
+    seen = set()
     for heading in soup.find_all('h2'):
         title = heading.get_text(' ', strip=True)
         if not title or len(title) > 180:
             continue
-        segment = []
-        for sibling in heading.next_siblings:
-            if getattr(sibling, 'name', None) == 'h2':
-                break
-            segment.append(sibling.get_text(' ', strip=True) if hasattr(sibling, 'get_text') else str(sibling).strip())
-            if len(segment) > 20:
-                break
-        text = ' '.join(segment)
-        match = re.search(r'\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}\s+[A-Za-z]{3}\s+20\d{2}\b', text)
+        card = next((parent for parent in heading.parents if parent.name in ('div', 'article')
+                     and re.search(r'\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}\s+[A-Za-z]{3}\s+20\d{2}\b', parent.get_text(' ', strip=True))
+                     and len(parent.get_text(' ', strip=True)) < 800), None)
+        if not card:
+            continue
+        card_text = card.get_text(' ', strip=True)
+        span = re.search(r'\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2})\s+([A-Za-z]{3})\s*[-–]\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}\s+[A-Za-z]{3}\s+(20\d{2})\b', card_text)
+        match = re.search(r'\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}\s+[A-Za-z]{3}\s+20\d{2}\b', card_text)
         if not match:
             continue
-        day = _future_date(match.group())
-        if not day:
+        day = _future_date(f'{span.group(1)} {span.group(2)} {span.group(3)}') if span else _future_date(match.group())
+        if not day or (title, day) in seen:
             continue
-        link = heading.find('a', href=True)
+        seen.add((title, day))
+        link = heading.find('a', href=True) or card.find('a', href=True)
         results.append(_base(title, day, 'New Theatre Oxford', urljoin(url, link['href']) if link else url, 'performance', 'Show date; check performance time'))
     return results
 

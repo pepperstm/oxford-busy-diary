@@ -90,12 +90,14 @@ SOURCES += [(name if name.endswith('College') else f'{name} College',f'https://w
 # Changes to mistaken seed addresses. Only rows still using the original URL are migrated.
 SOURCE_URL_FIXES = [
 ('All Souls College','https://www.all-souls.ox.ac.uk/events/','https://www.asc.ox.ac.uk/events'),
+('All Souls College','https://www.asc.ox.ac.uk/events/','https://www.asc.ox.ac.uk/events'),
 ('Bodleian Libraries events','https://visit.bodleian.ox.ac.uk/events','https://visit.bodleian.ox.ac.uk/events-exhibitions?direct=true'),
 ('Nuffield College','https://www.nuffield.ox.ac.uk/events/','https://www.nuffield.ox.ac.uk/news-events/events-and-seminars/'),
 ('Pembroke College','https://www.pmb.ox.ac.uk/events/','https://www.pmb.ox.ac.uk/news-events'),
 ('Corpus Christi College','https://www.ccc.ox.ac.uk/events/','https://www.ccc.ox.ac.uk/alumni/events-and-reunions'),
 ('Social Sciences Division','https://www.socsci.ox.ac.uk/events','https://www.socsci.ox.ac.uk/'),
 ('Oxford Botanic Garden and Arboretum','https://www.obga.ox.ac.uk/events','https://www.obga.ox.ac.uk/whats-on'),
+('Faculty of Law','https://www.law.ox.ac.uk/events','https://www.law.ox.ac.uk/content/listing-page/events'),
 ]
 FIXED_URLS = {(name, old): new for name, old, new in SOURCE_URL_FIXES}
 SOURCES = [(name, FIXED_URLS.get((name, url), url), kind) for name, url, kind in SOURCES]

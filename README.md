@@ -8,7 +8,7 @@ A local diary aid for Graham at The Plough Inn, 38 Cornmarket Street, Oxford OX1
 2. Unzip this package into a folder.
 3. Copy `.env.example` to `.env`. Set a real contact address in `USER_AGENT` so site operators can reach you.
 4. From that folder, run `docker compose up -d --build`.
-5. Open `http://localhost:8080`, open **Sources**, and start a scan. The first scan can take a while because requests are deliberately spaced out. Sources with a robots block or a changed page are shown in Source health. A source marked **empty** was reachable but produced no future dated events, which may be normal or may mean its page layout changed.
+5. Open `http://localhost:8080`, open **Sources**, and start a scan. The first scan can take a while because requests are deliberately spaced out. Sources with a robots block or a changed page are shown in Source health. A source marked **empty** was reachable but produced no future dated events, which may be normal or may mean its page layout changed. If an individual linked page fails, the source keeps events already found and reports the skipped page in its health line.
 6. When finished, run `docker compose down`. Your data stays in `./data/tracker.sqlite3`.
 
 If you leave the app running, it scans again every `SCAN_INTERVAL_HOURS` (default 24). Starting the app does not itself start a scan; use the button when you need fresh information.

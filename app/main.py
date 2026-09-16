@@ -51,11 +51,21 @@ def init_db():
         CREATE TABLE IF NOT EXISTS sightings (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, source_id INTEGER NOT NULL, url TEXT NOT NULL, seen_at TEXT NOT NULL, UNIQUE(event_id,url));
         CREATE INDEX IF NOT EXISTS idx_events_start ON events(start);
         ''')
+        # An earlier release seeded both spellings of the All Souls URL.
+        twins = db.execute('SELECT id,url FROM sources WHERE name="All Souls College" AND url IN (?,?) ORDER BY id',
+                           ('https://www.asc.ox.ac.uk/events', 'https://www.asc.ox.ac.uk/events/')).fetchall()
+        if len(twins) == 2:
+            keep, duplicate = twins[0]['id'], twins[1]['id']
+            db.execute('UPDATE events SET source_id=? WHERE source_id=?', (keep, duplicate))
+            db.execute('INSERT OR IGNORE INTO sightings(event_id,source_id,url,seen_at) SELECT event_id,?,url,seen_at FROM sightings WHERE source_id=?', (keep, duplicate))
+            db.execute('DELETE FROM sightings WHERE source_id=?', (duplicate,))
+            db.execute('DELETE FROM sources WHERE id=?', (duplicate,))
         # Migrate only untouched seed URLs; preserve any address edited by Graham.
         for name, old_url, new_url in SOURCE_URL_FIXES:
-            db.execute('UPDATE sources SET url=?,health="new",error=NULL WHERE name=? AND url=?', (new_url,name,old_url))
+            db.execute('UPDATE OR IGNORE sources SET url=?,health="new",error=NULL WHERE name=? AND url=?', (new_url,name,old_url))
         db.execute('UPDATE sources SET name="Oxford Events",url="https://events.ox.ac.uk/events",health="new",error=NULL WHERE name="Oxford Talks" AND url="https://talks.ox.ac.uk/"')
         db.execute('UPDATE sources SET name="University College" WHERE name="University College College"')
+        db.execute('UPDATE sources SET name="New College" WHERE name="New College College"')
         db.executemany('INSERT OR IGNORE INTO sources(name,url,kind) VALUES(?,?,?)', SOURCES)
 
 
@@ -187,7 +197,11 @@ def extract(html, url, source):
         kind = classify(title, card.get_text(' ', strip=True)[:300])
         if kind == 'other academic' and 'Theatre' in source['name']:
             kind = 'public event'
-        found.append(dict(title=title, start=start, end=None, venue=source['name'], organiser=source['name'], event_type=kind, attendance=None, public_clue='', source_url=urljoin(url, a['href']) if a else url, evidence='html'))
+        venue_tag = card.select_one('.venue .field--item, [itemprop="location"], .event-venue')
+        venue = venue_tag.get_text(' ', strip=True) if venue_tag else source['name']
+        if re.search(r'\b(?:online|virtual|hybrid event|Kazakhstan|London|Cambridge|Prato|Italy)\b', venue, re.I):
+            continue
+        found.append(dict(title=title, start=start, end=None, venue=venue, organiser=source['name'], event_type=kind, attendance=None, public_clue='', source_url=urljoin(url, a['href']) if a else url, evidence='html'))
     found = list({(e['title'].lower(),e['start'][:10]):e for e in found}.values())
     return found, soup
 
@@ -230,13 +244,20 @@ def scan_source(source_id):
         seen = set()
         count = 0
         found = 0
+        skipped = []
         try:
             while pages and count < MAX_PAGES:
                 url = pages.pop(0)
                 if url in seen or urlparse(url).netloc != urlparse(source['url']).netloc:
                     continue
                 seen.add(url)
-                html, final_url = fetch(url)
+                try:
+                    html, final_url = fetch(url)
+                except Exception as e:
+                    if count == 0:
+                        raise
+                    skipped.append(f'{url}: {str(e)[:120]}')
+                    continue
                 count += 1
                 if source['kind'] in ADAPTERS:
                     events = ADAPTERS[source['kind']](html, final_url)
@@ -254,7 +275,10 @@ def scan_source(source_id):
                             pages.append(href)
                 db.commit()
             health = f'ok · {found} events' if found else 'empty · no dated events'
-            db.execute('UPDATE sources SET last_checked=?,last_success=?,health=?,error=NULL,pages_checked=? WHERE id=?', (now(),now(),health,count,source_id))
+            if skipped:
+                health += f' · {len(skipped)} page(s) skipped'
+            db.execute('UPDATE sources SET last_checked=?,last_success=?,health=?,error=?,pages_checked=? WHERE id=?',
+                       (now(),now(),health,'; '.join(skipped[:2])[:400] if skipped else None,count,source_id))
         except Exception as e:
             db.execute('UPDATE sources SET last_checked=?,health=?,error=?,pages_checked=? WHERE id=?', (now(),'blocked' if 'robots' in str(e).lower() else 'error',str(e)[:400],count,source_id))
         db.commit()
