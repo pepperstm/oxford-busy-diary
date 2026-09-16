@@ -40,9 +40,25 @@ LINK_HINT = re.compile('|'.join(TYPES.values()) + r'|/events?/|/what.s.on/', re.
 CARD_DATE = re.compile(r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t|tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+(?:20)?\d{2})?\b', re.I)
 
 
+def diary_relevant(event_type, title):
+    """Keep dates likely to affect pub trade, including older stored leads."""
+    event_type = (event_type or '').lower()
+    title = title or ''
+    if event_type == 'other academic':
+        return 0
+    if re.search(r'\b(?:lecture|seminar|webinar|colloquium|book launch|book signing)\b', title, re.I):
+        return 0
+    if event_type == 'formal' and re.search(r'\b(?:dinner|luncheon|lunch|supper|reception|drinks)\b', title, re.I):
+        return 0
+    if event_type == 'public event' and re.search(r'\b(?:exhibition|guided tour|walking tour|gallery talk|film screening|reading)\b', title, re.I):
+        return 0
+    return 1
+
+
 def conn():
     db = sqlite3.connect(DB, timeout=30)
     db.row_factory = sqlite3.Row
+    db.create_function('diary_relevant', 2, diary_relevant, deterministic=True)
     db.execute('PRAGMA journal_mode=WAL')
     return db
 
@@ -368,7 +384,7 @@ def scan_source(source_id):
                         db.execute('INSERT INTO calendar_links(source_id,url,label,kind,last_seen) VALUES(?,?,?,?,?) ON CONFLICT(source_id,url) DO UPDATE SET label=excluded.label,kind=excluded.kind,last_seen=excluded.last_seen',
                                    (source_id,target,label,kind,now()))
                 for event in events:
-                    if (event['end'] or event['start'])[:10] >= datetime.now().date().isoformat():
+                    if diary_relevant(event['event_type'], event['title']) and (event['end'] or event['start'])[:10] >= datetime.now().date().isoformat():
                         save_event(db, event, source_id)
                         found += 1
                 if count == 1 and source['kind'] in ('listing', 'symposia'):
@@ -408,7 +424,7 @@ def scan_all():
 
 
 def filtered_events():
-    clauses = ['1=1']
+    clauses = ['diary_relevant(event_type,title)=1']
     args = []
     if not request.args.get('from'):
         clauses.append('COALESCE(end,start) >= ?')
@@ -474,7 +490,7 @@ def index():
     events = filtered_events()
     today = datetime.now().date().isoformat()
     with conn() as db:
-        stats = {k: db.execute(q).fetchone()[0] for k,q in {'sources':'SELECT COUNT(*) FROM sources','upcoming':'SELECT COUNT(*) FROM events WHERE COALESCE(end,start)>=date("now")','review':'SELECT COUNT(*) FROM events WHERE status="new" AND COALESCE(end,start)>=date("now")','errors':'SELECT COUNT(*) FROM sources WHERE health IN ("error","blocked")'}.items()}
+        stats = {k: db.execute(q).fetchone()[0] for k,q in {'sources':'SELECT COUNT(*) FROM sources','upcoming':'SELECT COUNT(*) FROM events WHERE diary_relevant(event_type,title)=1 AND COALESCE(end,start)>=date("now")','review':'SELECT COUNT(*) FROM events WHERE diary_relevant(event_type,title)=1 AND status="new" AND COALESCE(end,start)>=date("now")','errors':'SELECT COUNT(*) FROM sources WHERE health IN ("error","blocked")'}.items()}
     return render_template('index.html', events=events, stats=stats, today=today, filters=request.args, busy=busy_days(events, request.args.get('from'), request.args.get('to')))
 
 

@@ -91,7 +91,7 @@
             <label>From<input type="date" name="from" value="{{filters.get('from',today)}}"></label>
             <label>To<input type="date" name="to" value="{{filters.get('to','')}}"></label>
             <label>Venue<input name="venue" placeholder="Search venue" value="{{filters.get('venue','')}}"></label>
-            <label>Type<select name="type"><option value="">All types</option>{% for t in ['conference','symposium','workshop','graduation','open doors','open day','home match','term date','access alert','festival','formal','performance','public event','other academic'] %}<option value="{{t}}" {% if filters.get('type')==t %}selected{% endif %}>{{t|title}}</option>{% endfor %}</select></label>
+            <label>Type<select name="type"><option value="">All types</option>{% for t in ['conference','symposium','workshop','graduation','open doors','open day','home match','term date','access alert','festival','formal','performance','public event'] %}<option value="{{t}}" {% if filters.get('type')==t %}selected{% endif %}>{{t|title}}</option>{% endfor %}</select></label>
             <label>Confidence<select name="confidence"><option value="">Any</option><option value="0.8" {% if filters.get('confidence')=='0.8' %}selected{% endif %}>High</option><option value="0.6" {% if filters.get('confidence')=='0.6' %}selected{% endif %}>Medium+</option></select></label>
             <label>Status<select name="status"><option value="">All</option>{% for s in ['new','approved','ignored'] %}<option value="{{s}}" {% if filters.get('status')==s %}selected{% endif %}>{{s|title}}</option>{% endfor %}</select></label>
             <button class="button button-primary" type="submit">Apply filters</button>
