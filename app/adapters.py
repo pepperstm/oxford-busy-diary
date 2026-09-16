@@ -144,4 +144,102 @@ def access(html, url):
     return results
 
 
-ADAPTERS = {'fixtures': fixtures, 'ceremonies': ceremonies, 'terms': terms, 'theatre': theatre, 'access': access}
+def major(html, url):
+    """Read published date ranges from a few official annual event pages."""
+    soup = BeautifulSoup(html, 'html.parser')
+    for tag in soup(['script', 'style', 'nav', 'footer']):
+        tag.decompose()
+    text = soup.get_text(' ', strip=True)
+    host = url.split('/')[2].removeprefix('www.')
+    specifications = {
+        'ofc.org.uk': ('Oxford Farming Conference', 'Examination Schools, Oxford', 'conference',
+                        r'OFC\d{2} will take place from (\d{1,2}) to (\d{1,2}) (January) (20\d{2})'),
+        'orfc.org.uk': ('Oxford Real Farming Conference', 'Oxford city centre', 'conference',
+                         r'(\d{1,2})(?:st|nd|rd|th)? (January)\s*[-–]\s*(\d{1,2})(?:st|nd|rd|th)? (January) (20\d{2})'),
+        'marmalade.io': ('Marmalade Festival', 'Old Fire Station and venues across Oxford', 'festival',
+                          r'Save the date for (20\d{2}).{0,45}?(\d{1,2}) to (\d{1,2}) (April)'),
+        'oxfordliteraryfestival.org': ('Oxford Literary Festival', 'Oxford city centre', 'festival',
+                                        r'festival will run:.{0,30}?(\d{1,2})(?:st|nd|rd|th)? to Sunday (\d{1,2})(?:st|nd|rd|th)? (March) (20\d{2})'),
+    }
+    spec = specifications.get(host)
+    if not spec:
+        return []
+    title, venue, kind, pattern = spec
+    match = re.search(pattern, text, re.I)
+    if not match:
+        return []
+    groups = match.groups()
+    if host == 'orfc.org.uk':
+        first, month, last, _, year = groups
+    elif host == 'marmalade.io':
+        year, first, last, month = groups
+    else:
+        first, last, month, year = groups
+    try:
+        start = dateparser.parse(f'{first} {month} {year}', dayfirst=True).date()
+        end = dateparser.parse(f'{last} {month} {year}', dayfirst=True).date()
+    except (ValueError, TypeError):
+        return []
+    if end < date.today() or end < start or (end - start).days > 21:
+        return []
+    clue = 'Published event dates; check the organiser for changes'
+    if host == 'marmalade.io':
+        clue += '; runs alongside the Skoll World Forum'
+    event = _base(title, start.isoformat(), venue, url, kind, clue)
+    event['end'] = end.isoformat()
+    return [event]
+
+
+def science_festival(html, url):
+    soup = BeautifulSoup(html, 'html.parser')
+    heading = soup.find(string=re.compile(r'20\d{2} Oxford Science and Ideas Festival'))
+    if not heading:
+        return []
+    year = re.search(r'20\d{2}', heading).group()
+    events = []
+    for link in soup.select('a.event-link[href]'):
+        title = link.find('h2')
+        label = link.select_one('.event-date')
+        if not title or not label:
+            continue
+        day = _future_date(label.get_text(' ', strip=True).split(',')[0] + ' ' + year)
+        if day:
+            events.append(_base(title.get_text(' ', strip=True), day, 'Oxford', urljoin(url, link['href']), 'festival', 'IF Oxford public programme'))
+    return events
+
+
+def song_festival(html, url):
+    soup = BeautifulSoup(html, 'html.parser')
+    text = soup.get_text(' ', strip=True)
+    year_match = re.search(r'Oxford International Song Festival (20\d{2})', text)
+    range_match = re.search(r'Festival \((\d{1,2})-(\d{1,2}) Oct\)', text)
+    if year_match and range_match:
+        year = year_match.group(1)
+        start = f'{year}-10-{int(range_match.group(1)):02d}'
+        end = f'{year}-10-{int(range_match.group(2)):02d}'
+        if date.fromisoformat(end) >= date.today():
+            event = _base('Oxford International Song Festival', start, 'Venues across Oxford', url, 'festival', 'Published festival dates; check individual performances')
+            event['end'] = end
+            return [event]
+    dates = []
+    for tile in soup.select('.tile-content'):
+        label = tile.find('p')
+        title = tile.find('h4')
+        if not label or not title:
+            continue
+        match = re.search(r'\b\d{1,2} [A-Za-z]+ 20\d{2}\b', label.get_text(' ', strip=True))
+        if match:
+            day = _future_date(match.group())
+            if day:
+                dates.append(day)
+    if not dates:
+        return []
+    start, end = min(dates), max(dates)
+    if (date.fromisoformat(end) - date.fromisoformat(start)).days > 21:
+        return []
+    event = _base('Oxford International Song Festival', start, 'Venues across Oxford', url, 'festival', 'Festival programme dates; check individual performances')
+    event['end'] = end
+    return [event]
+
+
+ADAPTERS = {'fixtures': fixtures, 'ceremonies': ceremonies, 'terms': terms, 'theatre': theatre, 'access': access, 'major': major, 'science_festival': science_festival, 'song_festival': song_festival}

@@ -196,6 +196,8 @@ def key_for(event):
     title = re.sub(r'[^a-z0-9]+', ' ', event['title'].lower()).strip()
     if event['event_type'] == 'home match':
         return title + '|' + event['start'][:4]
+    if event['end'] and event['end'][:10] != event['start'][:10]:
+        return title + '|' + event['start'][:4]
     return title + '|' + event['start'][:10]
 
 
@@ -242,7 +244,7 @@ def scan_source(source_id):
                 else:
                     events, soup = extract(html, final_url, source)
                 for event in events:
-                    if event['start'][:10] >= datetime.now().date().isoformat():
+                    if (event['end'] or event['start'])[:10] >= datetime.now().date().isoformat():
                         save_event(db, event, source_id)
                         found += 1
                 if count == 1 and source['kind'] == 'listing':
@@ -274,9 +276,9 @@ def filtered_events():
     clauses = ['1=1']
     args = []
     if not request.args.get('from'):
-        clauses.append('start >= ?')
+        clauses.append('COALESCE(end,start) >= ?')
         args.append(datetime.now().date().isoformat())
-    for param, column, op in [('from','start','>='),('to','start','<'),('type','event_type','='),('status','status','='),('venue','venue','LIKE')]:
+    for param, column, op in [('from','COALESCE(end,start)','>='),('to','start','<'),('type','event_type','='),('status','status','='),('venue','venue','LIKE')]:
         val = request.args.get(param, '').strip()
         if val:
             if param == 'to': val += 'T23:59:59'
@@ -302,25 +304,34 @@ def proximity(event):
     return .75, 'Oxford'
 
 
-def busy_days(events):
+def busy_days(events, from_date=None, to_date=None):
     days = {}
     for event in events:
         if event['status'] == 'ignored' or event['event_type'] == 'access alert':
             continue
-        day = event['start'][:10]
         weight, area = proximity(event)
-        item = days.setdefault(day, {'date': day, 'score': 0, 'count': 0, 'reasons': [], 'areas': set()})
-        base = 85 if event['event_type'] == 'home match' else 55
-        item['score'] += round(base * event['relevance'] * weight * event['confidence'])
-        item['count'] += 1
-        item['areas'].add(area)
-        if len(item['reasons']) < 3:
-            item['reasons'].append(event['title'])
+        start = datetime.fromisoformat(event['start'][:10]).date()
+        end = datetime.fromisoformat((event['end'] or event['start'])[:10]).date()
+        for offset in range(min(22, max(0, (end - start).days + 1))):
+            day = (start + timedelta(days=offset)).isoformat()
+            if day < datetime.now().date().isoformat():
+                continue
+            if from_date and day < from_date:
+                continue
+            if to_date and day > to_date:
+                continue
+            item = days.setdefault(day, {'date': day, 'score': 0, 'count': 0, 'reasons': [], 'areas': set()})
+            base = 85 if event['event_type'] == 'home match' else 55
+            item['score'] += round(base * event['relevance'] * weight * event['confidence'])
+            item['count'] += 1
+            item['areas'].add(area)
+            if len(item['reasons']) < 3:
+                item['reasons'].append(event['title'])
     for item in days.values():
         item['score'] = min(100, item['score'] + min(25, (item['count'] - 1) * 8))
         item['level'] = 'Slammed watch' if item['score'] >= 70 else 'Busy watch' if item['score'] >= 40 else 'Worth noting'
         item['areas'] = ', '.join(sorted(item['areas']))
-    return sorted(days.values(), key=lambda d: (-d['score'], d['date']))[:10]
+    return sorted(days.values(), key=lambda d: d['date'])[:45]
 
 
 @app.route('/')
@@ -328,8 +339,8 @@ def index():
     events = filtered_events()
     today = datetime.now().date().isoformat()
     with conn() as db:
-        stats = {k: db.execute(q).fetchone()[0] for k,q in {'sources':'SELECT COUNT(*) FROM sources','upcoming':'SELECT COUNT(*) FROM events WHERE start>=date("now")','review':'SELECT COUNT(*) FROM events WHERE status="new" AND start>=date("now")','errors':'SELECT COUNT(*) FROM sources WHERE health IN ("error","blocked")'}.items()}
-    return render_template('index.html', events=events, stats=stats, today=today, filters=request.args, busy=busy_days(events))
+        stats = {k: db.execute(q).fetchone()[0] for k,q in {'sources':'SELECT COUNT(*) FROM sources','upcoming':'SELECT COUNT(*) FROM events WHERE COALESCE(end,start)>=date("now")','review':'SELECT COUNT(*) FROM events WHERE status="new" AND COALESCE(end,start)>=date("now")','errors':'SELECT COUNT(*) FROM sources WHERE health IN ("error","blocked")'}.items()}
+    return render_template('index.html', events=events, stats=stats, today=today, filters=request.args, busy=busy_days(events, request.args.get('from'), request.args.get('to')))
 
 
 @app.route('/sources')
@@ -407,7 +418,7 @@ def export_ics():
     for row in filtered_events():
         start = row['start']
         date = start[:10].replace('-','')
-        lines += ['BEGIN:VEVENT',f'UID:oxford-tracker-{row["id"]}@plough.local',f'DTSTAMP:{datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")}',f'DTSTART;VALUE=DATE:{date}',f'DTEND;VALUE=DATE:{(datetime.fromisoformat(start[:10]) + timedelta(days=1)).strftime("%Y%m%d")}',f'SUMMARY:{ics_escape(row["title"])}',f'LOCATION:{ics_escape(row["venue"])}',f'DESCRIPTION:{ics_escape(row["event_type"] + " | " + row["status"])}',f'URL:{row["source_url"]}','END:VEVENT']
+        lines += ['BEGIN:VEVENT',f'UID:oxford-tracker-{row["id"]}@plough.local',f'DTSTAMP:{datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")}',f'DTSTART;VALUE=DATE:{date}',f'DTEND;VALUE=DATE:{(datetime.fromisoformat((row["end"] or start)[:10]) + timedelta(days=1)).strftime("%Y%m%d")}',f'SUMMARY:{ics_escape(row["title"])}',f'LOCATION:{ics_escape(row["venue"])}',f'DESCRIPTION:{ics_escape(row["event_type"] + " | " + row["status"])}',f'URL:{row["source_url"]}','END:VEVENT']
     lines.append('END:VCALENDAR')
     return Response('\r\n'.join(lines)+'\r\n', mimetype='text/calendar', headers={'Content-Disposition':'attachment; filename=oxford-events.ics'})
 

@@ -78,6 +78,12 @@ SOURCES = [
 ('Oxford Botanic Garden and Arboretum','https://www.obga.ox.ac.uk/events','listing'),
 ('History of Science Museum','https://www.hsm.ox.ac.uk/events','listing'),
 ('Sheldonian Theatre','https://www.sheldonian.ox.ac.uk/events','listing'),
+('Oxford Farming Conference','https://www.ofc.org.uk/conference/2027/delegate_info','major'),
+('Oxford Real Farming Conference','https://orfc.org.uk/event/oxford-real-farming-conference-2027/','major'),
+('Marmalade Festival and Skoll Forum week','https://www.marmalade.io/','major'),
+('Oxford Literary Festival','https://oxfordliteraryfestival.org/','major'),
+('IF Oxford Science and Ideas Festival','https://if-oxford.com/events/','science_festival'),
+('Oxford International Song Festival','https://oxfordsong.org/','song_festival'),
 ]
 SOURCES += [(name if name.endswith('College') else f'{name} College',f'https://www.{host}/events/','listing') for name,host in (line.split('|') for line in COLLEGES.splitlines())]
 
